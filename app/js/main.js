@@ -461,7 +461,8 @@ function aiSummary(record) {
   const more = list => list.length > 3 ? h('li', { class: 'small' }, `и ещё ${list.length - 3}`) : null;
   const block = (title, body) => h('div', { class: 'ai-net' }, h('b', {}, title), body);
   const blocks = [];
-  if (pair && top3('efficientnet') === top3('wcr')) {
+  const merged = pair && top3('efficientnet') === top3('wcr');
+  if (merged) {
     const [sl, ssl] = PAIR.map(k => tops[k]);
     blocks.push(block('DeepECG SL и SSL', sl.list.length ? h('ul', {}, sl.list.slice(0, 3).map(([l, v]) => {
       const w = ssl.entry.scores[l], same = sl.t[l] === ssl.t[l];
@@ -469,7 +470,7 @@ function aiSummary(record) {
     }), more(sl.list)) : h('span', { class: 'small' }, 'ни одна метка не выше порога')));
   }
   for (const [key, { entry, t, list }] of Object.entries(tops)) {
-    if (blocks.length && PAIR.includes(key)) continue;
+    if (merged && PAIR.includes(key)) continue;
     blocks.push(block(entry.model || key, [entry.synthetic ? h('span', { class: 'pill warn' }, 'тест') : null,
       !t ? h('p', { class: 'small' }, 'Порогов нет — все оценки на странице ЭКГ.')
         : list.length ? h('ul', {}, list.slice(0, 3).map(([l, v]) => line(l, `оценка ${dec(v)} (порог ${dec(t[l])})${pair && PAIR.includes(key) ? (inBoth(l) ? ', в обеих SL/SSL' : ', только эта нейросеть') : ''}`)), more(list))
