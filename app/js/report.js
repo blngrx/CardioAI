@@ -195,7 +195,7 @@ function aiBlock(record, ctx) {
       .sort((x, y) => (t ? y[1] / t[y[0]] - x[1] / t[x[0]] : y[1] - x[1])).slice(0, 5);
     const list = ranked.length ? ranked.map(([l, v]) => `<li>«${esc(ctx.labelsRu?.[l] || l)}» — оценка ${num(v, 2)}${t ? ` (порог ${num(t[l], 2)})` : ''}</li>`).join('')
       : '<li>Признаков выше порога модели нет.</li>';
-    return `<div class="model"><b>${esc(MODEL_NAMES[key] || e.model || key)}</b>${e.synthetic ? ' — технический тест на искусственном сигнале, не оценка этой ЭКГ' : ''}${t ? '' : ' (у модели нет порогов — показаны наибольшие оценки)'}<ul>${list}</ul></div>`;
+    return `<div class="model"><b>${esc(MODEL_NAMES[key] || e.model || key)}</b>${e.synthetic ? ' — технический тест на искусственном сигнале, не оценка этой ЭКГ' : ''}${t ? '' : ' (у модели нет порогов — показаны наибольшие оценки)'}${!e.synthetic && e.qcWarnings?.length ? `<p class="small">Качество записи: ${esc(e.qcWarnings.join('; '))}. Оценки могут быть недостоверны.</p>` : ''}<ul>${list}</ul></div>`;
   }).join('');
   return `<section class="block ai"><h2>Автоматический анализ (исследовательские нейросети) — справочно</h2>
 <p class="small">Признаки, отмеченные моделью. Модели не проверены на записях 3 с прибора ECG301. Оценка — не вероятность и не диагноз.</p><div class="models">${items}</div></section>`;
