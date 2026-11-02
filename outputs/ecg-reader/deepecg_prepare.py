@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy.signal import resample_poly
+from ecg_qc import assess
 from ecg_reader import LEADS, read_record
 
 
@@ -54,6 +55,8 @@ def prepare(counts, meta):
                                    simultaneous_verified=True),
                    verification_evidence=meta['verification_evidence'],
                    synthetic_input=meta.get('synthetic_input') is True,
+                   # Before resampling: anti-alias ripple would hide a clipped rail.
+                   qc=assess(mv[:round(10 * fs)], fs),
                    model_run=False, clinical_validation=False)
 
 

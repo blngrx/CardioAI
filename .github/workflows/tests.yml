@@ -16,6 +16,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Signal-quality checks (no models)
+        working-directory: outputs/ecg-reader
+        run: |
+          pip install numpy==2.3.5 scipy==1.18.1
+          python test_ecg_qc.py
       - name: Patient storage and app serving (Python, no models)
         working-directory: outputs/ecg-reader
         run: python test_patient_store.py

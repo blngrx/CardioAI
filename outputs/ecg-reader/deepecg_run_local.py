@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import torch
 
+from ecg_qc import assess
+
 import os
 ROOT = Path(__file__).resolve().parents[2]
 # Models, sources and runtime: <repo>/work, or CARDIOAI_WORK for the desktop program.
@@ -103,6 +105,7 @@ def infer(signal, architecture='efficientnet'):
                 scores={label:float(value) for label,value in zip(labels,scores[0])},
                 thresholds=thresholds(architecture, labels),
                 threshold_source='DeepECG_Docker thresholds/77_tasks_final.json (' + ('SL' if architecture == 'efficientnet' else 'SSL') + '_sens_spec_threshold)',
+                qc=assess(signal, 250),
                 diagnosis_assigned=False,
                 note='Raw model scores, not calibrated individual disease probabilities; clinical validation not established')
 

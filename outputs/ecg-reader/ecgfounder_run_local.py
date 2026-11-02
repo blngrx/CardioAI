@@ -12,6 +12,8 @@ import numpy as np
 from scipy.signal import resample_poly
 import torch
 
+from ecg_qc import assess
+
 APP = Path(__file__).resolve().parent
 ROOT = APP.parents[1]
 WORK = Path(os.environ.get('CARDIOAI_WORK') or ROOT / 'work')
@@ -106,6 +108,7 @@ def infer(signal):
                 preprocessing=manifest['preprocessing'], model_input_shape=[1,12,5000],
                 runtime=dict(python=platform.python_version(), torch=torch.__version__,
                              numpy=np.__version__, platform=platform.machine(), evaluation_mode=True),
+                qc=assess(signal, 250),
                 diagnosis_assigned=False,
                 note='Raw model scores, not calibrated individual probabilities; clinical validation on ECG301 not established')
 

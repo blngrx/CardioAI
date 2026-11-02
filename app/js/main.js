@@ -244,7 +244,7 @@ function aiEntry(report, extra = {}) {
   const weightsSha = report.weights?.sha256 || report.weights?.finetuned?.sha256 || null;
   // Older reports have no thresholds: on the desktop take them from the installed upstream.
   const thresholds = report.thresholds || (Object.keys(state.thresholds[key] || {}).length ? state.thresholds[key] : null);
-  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, weightsSha,
+  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, weightsSha, qcWarnings: report.qc?.warnings || [],
     synthetic: report.synthetic_test === true, attachedAt: new Date().toISOString(), ...extra }];
 }
 
@@ -694,6 +694,7 @@ function aiCard(patient, record) {
     const { t, ranked, above } = aiAbove(entry);
     box.append(h('div', { 'data-model': key }, h('h3', {}, entry.model || key),
       entry.synthetic ? notice('Это технический тест на искусственном сигнале, а не оценка этой ЭКГ.') : null,
+      !entry.synthetic && entry.qcWarnings?.length ? notice(`Качество записи: ${entry.qcWarnings.join('; ')}. Оценки могут быть недостоверны.`) : null,
       t ? h('p', { class: 'muted' }, `Выше рабочего порога авторов: ${above.length} из ${ranked.length}. Порог подобран на данных авторов, не на ECG301.`)
         : notice('Порогов у этой нейросети нет. Ниже — первые 10 по величине оценки; это не находки.'),
       above.length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, h('th', {}, 'Метка нейросети'), h('th', { class: 'num' }, 'Оценка'), t ? h('th', { class: 'num' }, 'Порог') : null)),
