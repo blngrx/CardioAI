@@ -57,15 +57,26 @@ def choose_work_dir(data):
     return data / 'work'
 
 
+def open_missing_streams():
+    """A windowed build (console=False) starts without stdout/stderr; http.server logs every request to stderr."""
+    for name in ('stdout', 'stderr'):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, 'w', encoding='utf-8'))
+
+
 class Api:
-    """Functions the page can call through window.pywebview.api."""
+    """Functions the page can call through window.pywebview.api.
+
+    Attributes must stay private: pywebview walks public ones when it exposes this object, and
+    on Windows a window stored here leads it into WinForms objects, which freezes the program.
+    """
 
     def __init__(self):
-        self.window = None
+        self._window = None
 
     def save_file(self, name, text):
         import webview
-        result = self.window.create_file_dialog(webview.SAVE_DIALOG, save_filename=Path(name).name)
+        result = self._window.create_file_dialog(webview.SAVE_DIALOG, save_filename=Path(name).name)
         if not result:
             return None
         target = Path(result if isinstance(result, str) else result[0])
@@ -91,6 +102,7 @@ class Api:
 
 
 def main():
+    open_missing_streams()
     data = data_dir()
     data.mkdir(parents=True, exist_ok=True)
     os.environ['CARDIOAI_DATA'] = str(data)
@@ -126,7 +138,7 @@ def main():
         return
     api = Api()
     webview.settings['ALLOW_DOWNLOADS'] = True
-    api.window = webview.create_window('CardioAI', url, js_api=api, width=1240, height=880, min_size=(380, 600))
+    api._window = webview.create_window('CardioAI', url, js_api=api, width=1240, height=880, min_size=(380, 600))
     try:
         webview.start(private_mode=False)
     except Exception:  # e.g. WebView2 missing on an old Windows: the browser still works

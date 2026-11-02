@@ -51,6 +51,29 @@ def wait(check, seconds, label):
     raise SystemExit(f'Timeout: {label}')
 
 
+def check_without_console(program, temp):
+    """Run the way a double-click does: no redirected output, so a windowed build has no stderr."""
+    port = free_port()
+    env = dict(os.environ, CARDIOAI_DATA=str(temp / 'data-no-console'), CARDIOAI_PORT=str(port))
+    process = subprocess.Popen([program, '--headless'], env=env)
+    client = Client(port)
+    try:
+        def started():
+            try:
+                return client.get('/api/status')
+            except OSError:
+                return None
+        wait(started, 60, 'program start without a console')
+        client.get('/app/', raw=True)
+        print('without a console: ok')
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('program', help='CardioAI executable (inside the .app on macOS)')
@@ -102,6 +125,7 @@ def main():
             work = Path(setup['work_dir'])
             if sys.platform == 'win32' and 'Roaming' in work.parts:
                 raise SystemExit('Models folder must not be in the roaming profile: ' + str(work))
+            check_without_console(args.program, temp)
             return
         client.post('/api/setup/start', {'confirm': True})
         last = ['']

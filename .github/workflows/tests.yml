@@ -25,3 +25,6 @@ jobs:
       - name: Choice of neural networks in the installer (no downloads)
         working-directory: outputs/ecg-reader
         run: python test_model_setup.py
+      - name: Desktop program rules (no window, no downloads)
+        working-directory: outputs/ecg-reader
+        run: python test_desktop_program.py
