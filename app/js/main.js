@@ -1,5 +1,5 @@
 // CardioAI single-page app: patients, ECG history, serial comparison.
-import { LEADS, ASSUMED, parseECG301, sha256Hex } from './ecg301.js';
+import { LEADS, ASSUMED, ECG301_SIZES, parseECG301, sha256Hex } from './ecg301.js';
 import { deriveMeasurements, ageAt } from './measure.js';
 import { compareRecords, autoComparisons, trend, sustainedTrends, rangeStatus, normalRange, LEVEL_TEXT } from './compare.js';
 import { RULES, MEASURE_LABELS, LABEL_GROUP_OF } from './rules.js';
@@ -244,7 +244,7 @@ function aiEntry(report, extra = {}) {
   const weightsSha = report.weights?.sha256 || report.weights?.finetuned?.sha256 || null;
   // Older reports have no thresholds: on the desktop take them from the installed upstream.
   const thresholds = report.thresholds || (Object.keys(state.thresholds[key] || {}).length ? state.thresholds[key] : null);
-  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, weightsSha,
+  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, research: report.research === true, note: report.note, assumptions: report.assumptions, sourceSha256: report.source_sha256, weightsSha,
     synthetic: report.synthetic_test === true, attachedAt: new Date().toISOString(), ...extra }];
 }
 
@@ -693,6 +693,7 @@ function aiCard(patient, record) {
   for (const [key, entry] of entries) {
     const { t, ranked, above } = aiAbove(entry);
     box.append(h('div', { 'data-model': key }, h('h3', {}, entry.model || key),
+      entry.research ? notice(entry.note || 'Исследовательский расчёт: время, масштаб и синхронность каналов не подтверждены. Оценки не являются диагнозом.') : null,
       entry.synthetic ? notice('Это технический тест на искусственном сигнале, а не оценка этой ЭКГ.') : null,
       t ? h('p', { class: 'muted' }, `Выше рабочего порога авторов: ${above.length} из ${ranked.length}. Порог подобран на данных авторов, не на ECG301.`)
         : notice('Порогов у этой нейросети нет. Ниже — первые 10 по величине оценки; это не находки.'),
@@ -838,7 +839,7 @@ function fileCompareCard() {
   const out = h('div'), msg = h('p', { role: 'alert', class: 'error' });
   const loadAny = async file => {
     const buffer = await readFile(file);
-    if (buffer.byteLength !== 39381) {
+    if (!ECG301_SIZES.includes(buffer.byteLength)) {
       const data = JSON.parse(new TextDecoder().decode(buffer));
       if (data.format === 'cardioai-record') return data.record;
     }
@@ -938,7 +939,7 @@ function setupCard() {
       st.work_dir ? h('details', {}, h('summary', {}, 'Где хранятся нейросети'), h('p', { class: 'muted' }, st.work_dir)) : null,
       st.supported ? null : notice('Для этого компьютера нет готовой сборки нейросетей. Поддерживаются Windows x64 и Mac на Apple Silicon (M1 и новее).'),
       h('div', { class: 'actions' }, button, cancel),
-      notice('Файлы прибора ECG301 короче 10 секунд, поэтому нейросети по ним пока не работают. Готовый анализ (файл .json) можно прикрепить к ЭКГ пациента.'));
+      notice('Время, масштаб и синхронность каналов ECG301 пока не подтверждены, поэтому нейросети по этим файлам пока не работают. Готовый анализ (файл .json) можно прикрепить к ЭКГ пациента.'));
   };
   const poll = async () => {
     clearTimeout(timer);

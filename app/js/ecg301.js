@@ -2,6 +2,8 @@
 // Units are ADC counts. Sampling rate and voltage scale are NOT confirmed by the manufacturer.
 export const LEADS = ['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
 export const ECG301_SIZE = 39381;
+// Observed variants: identical header and block A, 600 or 2000 samples per lead in B.
+export const ECG301_SIZES = [ECG301_SIZE, 72981];
 // Photo-based estimates for block B (unverified, see README).
 export const ASSUMED = { fsB: 200, fsA: 1000, microvoltsPerCount: 1.16, zeroCounts: 2048 };
 
@@ -58,8 +60,8 @@ export function devicePatient(bytes) {
 }
 
 export function parseECG301(buffer) {
-  if (buffer.byteLength !== ECG301_SIZE)
-    throw Error(`Неизвестный вариант файла: ${buffer.byteLength} байт, ожидалось ${ECG301_SIZE}. Файл не изменён.`);
+  if (!ECG301_SIZES.includes(buffer.byteLength))
+    throw Error(`Неизвестный вариант файла: ${buffer.byteLength} байт, ожидалось ${ECG301_SIZES.join(" или ")}. Файл не изменён.`);
   const view = new DataView(buffer), bytes = new Uint8Array(buffer);
   const id = String.fromCharCode(...bytes.slice(6, 20));
   if (!/^\d{14}$/.test(id)) throw Error('Не распознан идентификатор записи');
@@ -72,10 +74,12 @@ export function parseECG301(buffer) {
     }
     return lead;
   });
-  const A = read(79, 1000), B = read(24981, 600);
+  const A = read(79, 1000), B = read(24981, (buffer.byteLength - 24981) / 24);
   const [hr, pr, qrs, qt, qtc] = Array.from({ length: 5 }, (_, i) => view.getUint16(24079 + 2 * i, true));
   const rr = Array.from({ length: 11 }, (_, i) => view.getUint16(24089 + 2 * i, true));
-  if (hr < 20 || hr > 300 || qrs < 20 || qrs > 400 || qt < 100 || qt > 800 || rr.some(v => v < 200 || v > 3000))
+  // Unused RR slots are zero-filled; only a trailing suffix may be empty.
+  while (rr.length && rr.at(-1) === 0) rr.pop();
+  if (hr < 20 || hr > 300 || qrs < 20 || qrs > 400 || qt < 100 || qt > 800 || !rr.length || rr.some(v => v < 200 || v > 3000))
     throw Error('Поля записи не прошли проверку формата');
   const checks = {};
   for (const [name, x] of Object.entries({ A, B })) {

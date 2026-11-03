@@ -68,6 +68,20 @@ class FolderWorkerTest(unittest.TestCase):
         self.assertEqual(worker.scan(), 0)  # first sight: the file may still be syncing
         return worker.scan()
 
+    def test_long_record_import_and_javascript_parity(self):
+        script = NODE.replace("patient: ['', 'ivanov  ', 'petr']", "patient: ['', 'ivanov  ', 'petr'], samples: 2000, rrCount: 9")
+        script = script.replace('[812, 790, 845, 801, 1210, 640, 799, 833, 780, 905, 760]', '[812, 790, 845, 801, 1210, 640, 799, 833, 780]')
+        js = json.loads(subprocess.run(['node', '--input-type=module', '-e', script, str(self.ecg)], cwd=ROOT, check=True,
+                         capture_output=True, text=True).stdout)
+        store = PatientStore(self.dir / 'store')
+        worker = FolderWorker(store, self.dir / 'exchange', partial_wait=0)
+        self.assertEqual(self.drop(worker, 'long-record'), 1)
+        [patient] = store.list_patients()
+        [record] = store.list_records(patient['id'])
+        self.assertEqual(record['signal']['leads'], js['leads'])
+        self.assertEqual(record['measurements'], js['measurements'])
+        self.assertEqual(len(record['device']['RR_ms']), 9)
+
     def test_exchange_folder(self):
         store = PatientStore(self.dir / 'store')
         worker = FolderWorker(store, self.dir / 'exchange', partial_wait=0)

@@ -101,56 +101,106 @@ class Api:
         return str(target)
 
 
+class BackgroundServer:
+    """Initialize disk/cloud resources outside the native window's event loop."""
+
+    def __init__(self):
+        self.server = None
+        self.lock = threading.Lock()
+        self.closed = False
+
+    def start(self):
+        with self.lock:
+            if self.closed:
+                return None
+            if self.server:
+                return f'http://127.0.0.1:{self.server.server_address[1]}/app/'
+        data = data_dir()
+        data.mkdir(parents=True, exist_ok=True)
+        os.environ['CARDIOAI_DATA'] = str(data)
+        os.environ['CARDIOAI_WORK'] = str(choose_work_dir(data))
+        if '--exchange' in sys.argv:
+            os.environ['CARDIOAI_EXCHANGE'] = '1'
+        from deepecg_local_server import LocalServer
+        server = LocalServer(int(os.environ.get('CARDIOAI_PORT', '0')))
+        with self.lock:
+            if self.closed:
+                server.server_close()
+                return None
+            self.server = server
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        return f'http://127.0.0.1:{server.server_address[1]}/app/'
+
+    def stop(self):
+        with self.lock:
+            self.closed = True
+            server = self.server
+        if server:
+            server.shutdown()
+            server.server_close()
+
+
+LOADING_HTML = """<!doctype html><html lang="ru"><meta charset="utf-8">
+<title>CardioAI</title><style>body{font:17px -apple-system,BlinkMacSystemFont,sans-serif;
+background:#f6f8fa;color:#182330;padding:50px}p{color:#576575}</style>
+<h1>CardioAI</h1><p>Открытие данных…</p></html>"""
+
+
 def main():
     open_missing_streams()
-    data = data_dir()
-    data.mkdir(parents=True, exist_ok=True)
-    os.environ['CARDIOAI_DATA'] = str(data)
-    os.environ['CARDIOAI_WORK'] = str(choose_work_dir(data))
-    if '--exchange' in sys.argv:
-        # Home computer mode: process the exchange folder (see outputs/ecg-reader/folder_worker.py).
-        os.environ['CARDIOAI_EXCHANGE'] = '1'
-    from deepecg_local_server import LocalServer
-    headless = '--headless' in sys.argv
-    port = int(os.environ.get('CARDIOAI_PORT', '0'))
-    server = LocalServer(port)
-    url = f'http://127.0.0.1:{server.server_address[1]}/app/'
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    if headless:
-        # Server only (tests, or a home PC serving other devices later).
-        print('CardioAI: ' + url, flush=True)
+    backend = BackgroundServer()
+    if '--headless' in sys.argv:
         try:
-            thread.join()
+            print('CardioAI: ' + backend.start(), flush=True)
+            threading.Event().wait()
         except KeyboardInterrupt:
-            server.shutdown()
+            pass
+        finally:
+            backend.stop()
         return
     try:
         import webview
     except ImportError:
-        # No native window toolkit: use the default browser instead.
-        print('CardioAI: ' + url, flush=True)
-        webbrowser.open(url)
         try:
-            thread.join()
+            url = backend.start()
+            print('CardioAI: ' + url, flush=True)
+            webbrowser.open(url)
+            threading.Event().wait()
         except KeyboardInterrupt:
             pass
+        finally:
+            backend.stop()
         return
     api = Api()
     webview.settings['ALLOW_DOWNLOADS'] = True
-    api._window = webview.create_window('CardioAI', url, js_api=api, width=1240, height=880, min_size=(380, 600))
-    try:
-        webview.start(private_mode=False)
-    except Exception:  # e.g. WebView2 missing on an old Windows: the browser still works
-        print('CardioAI: ' + url, flush=True)
-        webbrowser.open(url)
+    # First let Cocoa/WinForms run and paint a window. Startup may touch cloud or network disks.
+    api._window = webview.create_window('CardioAI', html=LOADING_HTML, js_api=api,
+                                        width=1240, height=880, min_size=(380, 600))
+
+    def load():
         try:
-            thread.join()
-        except KeyboardInterrupt:
-            pass
+            url = backend.start()
+            if url:
+                api._window.load_url(url)
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            api._window.load_html(LOADING_HTML.replace('Открытие данных…',
+                'Не удалось открыть данные. Закройте программу и повторите запуск.'))
+
+    try:
+        # pywebview runs this callback in a worker; native events stay on the main thread.
+        webview.start(load, private_mode=False)
+    except Exception:  # e.g. WebView2 is missing on Windows
+        url = backend.start()
+        if url:
+            webbrowser.open(url)
+            try:
+                threading.Event().wait()
+            except KeyboardInterrupt:
+                pass
     finally:
-        server.shutdown()
-        server.server_close()
+        backend.stop()
 
 
 if __name__ == '__main__':

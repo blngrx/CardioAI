@@ -31,7 +31,7 @@ import threading
 import time
 import unicodedata
 
-from ecg_reader import SIZE, read_record
+from ecg_reader import SIZE, SIZES, read_record
 
 INBOX, RESULTS, DONE, FAILED = 'Входящие', 'Результаты', 'Обработанные', 'Ошибки'
 SKIP = re.compile(r'^[.~]|^(desktop\.ini|thumbs\.db)$|\.(part|tmp|crdownload|download|icloud|txt|md|json)$', re.I)
@@ -298,8 +298,8 @@ class FolderWorker:
         folder = parts[0] if len(parts) == 2 else None
         try:
             size = path.stat().st_size
-            if size != SIZE:  # do not read big unrelated files into memory
-                raise ValueError(f'Это не файл ЭКГ прибора ECG301: {size} байт, ожидается {SIZE}. '
+            if size not in SIZES:  # do not read big unrelated files into memory
+                raise ValueError(f'Это не файл ЭКГ прибора ECG301: {size} байт, ожидается {SIZES}. '
                                  'Если файл копировался долго, положите его во «Входящие» ещё раз.')
             record = record_from_ecg301(path.read_bytes(), path.name)
             owner = self.owner_of(record['sha256'])

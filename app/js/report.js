@@ -183,7 +183,7 @@ function measurementsTable(record, sex) {
 }
 function rrLine(record) {
   const rr = (record.device?.RR_ms || []).filter(Number.isFinite);
-  return `<p class="rhythm"><b>Ритм:</b> оценивает врач — запись 3 с недостаточна для оценки ритма и экстрасистол.${rr.length ? ` RR, мс: ${rr.map(v => num(v)).join(' · ')}.` : ''}</p>`;
+  return `<p class="rhythm"><b>Ритм:</b> оценивает врач — автоматическая классификация ритма и экстрасистол не выполняется.${rr.length ? ` RR, мс: ${rr.map(v => num(v)).join(' · ')}.` : ''}</p>`;
 }
 
 function aiBlock(record, ctx) {
@@ -195,10 +195,10 @@ function aiBlock(record, ctx) {
       .sort((x, y) => (t ? y[1] / t[y[0]] - x[1] / t[x[0]] : y[1] - x[1])).slice(0, 5);
     const list = ranked.length ? ranked.map(([l, v]) => `<li>«${esc(ctx.labelsRu?.[l] || l)}» — оценка ${num(v, 2)}${t ? ` (порог ${num(t[l], 2)})` : ''}</li>`).join('')
       : '<li>Признаков выше порога модели нет.</li>';
-    return `<div class="model"><b>${esc(MODEL_NAMES[key] || e.model || key)}</b>${e.synthetic ? ' — технический тест на искусственном сигнале, не оценка этой ЭКГ' : ''}${t ? '' : ' (у модели нет порогов — показаны наибольшие оценки)'}<ul>${list}</ul></div>`;
+    return `<div class="model"><b>${esc(MODEL_NAMES[key] || e.model || key)}</b>${e.synthetic ? ' — технический тест на искусственном сигнале, не оценка этой ЭКГ' : ''}${e.research ? `<p class="small">${esc(e.note || 'Исследовательский расчёт: калибровка не подтверждена.')}</p>` : ''}${t ? '' : ' (у модели нет порогов — показаны наибольшие оценки)'}<ul>${list}</ul></div>`;
   }).join('');
   return `<section class="block ai"><h2>Автоматический анализ (исследовательские нейросети) — справочно</h2>
-<p class="small">Признаки, отмеченные моделью. Модели не проверены на записях 3 с прибора ECG301. Оценка — не вероятность и не диагноз.</p><div class="models">${items}</div></section>`;
+<p class="small">Признаки, отмеченные моделью. Модели не проверены на файлах прибора ECG301. Оценка — не вероятность и не диагноз.</p><div class="models">${items}</div></section>`;
 }
 
 function conclusion(lines) {

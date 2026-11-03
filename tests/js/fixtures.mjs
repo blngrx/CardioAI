@@ -10,8 +10,8 @@ function beat(t, fs, rate, { qrsWidth = 0.025, amp = 1, tAmp = 0.25 } = {}) {
 
 // Returns an ArrayBuffer laid out like the studied ECG301 variant.
 export function syntheticECG301({ id = '20260101120000', rate = 75, hr = 75, pr = 160, qrs = 92, qt = 380, qtc = 410,
-  axes = [50, 45, 40], rv5 = 1.8, sv1 = 0.9, shape = {}, patient = [] } = {}) {
-  const buf = new ArrayBuffer(39381), view = new DataView(buf), bytes = new Uint8Array(buf);
+  axes = [50, 45, 40], rv5 = 1.8, sv1 = 0.9, shape = {}, patient = [], samples = 600, rrCount = 11 } = {}) {
+  const buf = new ArrayBuffer(24981 + 24 * samples), view = new DataView(buf), bytes = new Uint8Array(buf);
   for (let i = 0; i < 14; i++) bytes[6 + i] = id.charCodeAt(i);
   // Text typed on the device: [field at 22, at 34, at 47], as in app/js/ecg301.js PATIENT_FIELDS.
   patient.forEach((text, k) => bytes.set(new TextEncoder().encode(text), [22, 34, 47][k]));
@@ -26,9 +26,9 @@ export function syntheticECG301({ id = '20260101120000', rate = 75, hr = 75, pr 
     }
   };
   write(79, 1000, 1000);
-  write(24981, 600, 200);
+  write(24981, samples, 200);
   [hr, pr, qrs, qt, qtc].forEach((v, i) => view.setUint16(24079 + 2 * i, v, true));
-  for (let i = 0; i < 11; i++) view.setUint16(24089 + 2 * i, Math.round(60000 / rate), true);
+  for (let i = 0; i < rrCount; i++) view.setUint16(24089 + 2 * i, Math.round(60000 / rate), true);
   axes.forEach((v, i) => view.setUint16(24451 + 2 * i, v < 0 ? v + 360 : v, true));
   view.setFloat32(24459, rv5, true);
   view.setFloat32(24463, sv1, true);

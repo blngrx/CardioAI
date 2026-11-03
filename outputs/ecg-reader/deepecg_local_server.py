@@ -113,12 +113,14 @@ class LocalServer(ThreadingHTTPServer):
         self.lock = threading.RLock()
         self.children = set()
         self.stopping = False
+        # TCPServer calls server_close even if binding fails. Cleanup must be ready first.
+        self.setup = ModelSetup()
+        self.exchange = None
         super().__init__(('127.0.0.1', port), Handler)
         self.token = secrets.token_hex(32)
         self.runs = Path(runs) if runs else APP / 'local-runs'
         self.runs.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.store = PatientStore(self.runs / 'cardioai-store')
-        self.setup = ModelSetup()
         self.jobs = {}
         self.slot = threading.BoundedSemaphore(1)
         for entry in sorted(self.runs.glob('*/job.json')):
