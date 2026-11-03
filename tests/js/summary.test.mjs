@@ -12,9 +12,9 @@ const review = (extra = {}) => ({ schemaVersion: 1, basis: 'clinician-reviewed',
   reviewedBy: 'test reviewer', reviewedAt: '2026-11-03T16:00:00Z', ...extra });
 const model = (scores, thresholds, extra = {}) => ({ scores, thresholds, sourceSha256: hash, ...extra });
 
-test('seven concise fields, adult resting rate, axis direction without angles', () => {
+test('eight concise fields, adult resting rate, axis direction without angles', () => {
   const r = record();
-  assert.equal(buildSummary(r).items.length, 7);
+  assert.equal(buildSummary(r).items.length, 8);
   assert.match(row(r, 'heartRate'), /62 уд\/мин — нормальная для взрослого в покое/);
   assert.match(row(r, 'axis'), /влево/);
   assert.doesNotMatch(row(r, 'axis'), /47|°|умеренн|значительн/);
@@ -93,4 +93,25 @@ test('a waveform research result stays explicitly preliminary and bound to its s
   r.waveformResearch.sourceSha256 = hash;
   r.interpretation = review({ stElevation: { status: 'absent' } });
   assert.match(row(r, 'st'), /не выявлен/);
+});
+
+test('P and T inversion are separate observations, not a blanket pathology diagnosis', () => {
+  const r = record({ interpretation: review({ waveInversion: {
+    P: { status: 'present', leads: ['II', 'III', 'aVF', 'II', '<script>'] },
+    T: { status: 'present', leads: ['aVR'] }
+  } }) });
+  assert.match(row(r, 'waveInversion'), /P: перевёрнутая форма в II, III, aVF/);
+  assert.match(row(r, 'waveInversion'), /T: отрицательный в aVR — обычное направление/);
+  assert.doesNotMatch(row(r, 'waveInversion'), /<script>|патологическ/);
+  r.interpretation.waveInversion.T = { status: 'absent' };
+  assert.match(row(r, 'waveInversion'), /T: инверсия на этой записи не выявлена/);
+});
+test('legacy seven-field waveform reports remain usable, without inventing inversion', () => {
+  const r = record();
+  const summary = Object.fromEntries(buildSummary(r).items.filter(x => x.key !== 'waveInversion').map(x => [x.key, 'Наблюдение '+x.key]));
+  r.waveformResearch = { schemaVersion: 1, basis: 'waveform-research', clinicalValidation: false, sourceSha256: hash,
+    method: 'test', assumptions: { fs_hz: 200, microvolts_per_count: 1 }, summary };
+  assert.equal(row(r, 'axis'), summary.axis);
+  assert.match(row(r, 'waveInversion'), /не определена/);
+  assert.doesNotMatch(row(r, 'waveInversion'), /undefined/);
 });

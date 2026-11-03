@@ -59,6 +59,25 @@ function waves(review, entries) {
   return suggests(entries, l => /^Q wave|^QS complex|^T wave inversion/.test(l))
     ? 'ИИ предполагает изменения зубцов. Наличие патологических зубцов не подтверждено.' : UNKNOWN;
 }
+function waveInversion(review, entries) {
+  const allowed = new Set(['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']);
+  const parts = [];
+  for (const wave of ['P', 'T']) {
+    const finding = review?.waveInversion?.[wave];
+    if (finding?.status === 'absent') parts.push(`${wave}: инверсия на этой записи не выявлена.`);
+    else if (finding?.status === 'present') {
+      const leads = [...new Set(Array.isArray(finding.leads) ? finding.leads.filter(l => allowed.has(l)) : [])];
+      if (wave === 'T' && leads.length === 1 && leads[0] === 'aVR')
+        parts.push('T: отрицательный в aVR — обычное направление для этого отведения.');
+      else parts.push(`${wave}: перевёрнутая форма${leads.length ? ' в ' + leads.join(', ') : '; отведения не уточнены'}.`);
+    }
+  }
+  if (parts.length) return parts.join(' ');
+  return suggests(entries, l => /^T wave inversion/.test(l))
+    ? 'ИИ предполагает инверсию T — перевёрнутую форму зубца. По кривой не подтверждено; инверсия P отдельно не оценена.'
+    : 'Инверсия P и T отдельно не определена. Отрицательный зубец сам по себе не означает патологию.';
+}
+
 function st(review, entries) {
   if (review?.stElevation?.status === 'present') return 'Подъём ST выявлен на этой записи.';
   if (review?.stElevation?.status === 'absent') return 'Подъём ST на этой записи не выявлен.';
@@ -124,6 +143,7 @@ function waveformObservations(record) {
     && typeof r.method === 'string' && r.method.trim()
     && finite(r.assumptions?.fs_hz) && r.assumptions.fs_hz > 0
     && finite(r.assumptions?.microvolts_per_count) && r.assumptions.microvolts_per_count > 0
+    && (r.summary?.waveInversion === undefined || (typeof r.summary.waveInversion === 'string' && r.summary.waveInversion.trim() && r.summary.waveInversion.length <= 500))
     && keys.every(k => typeof r.summary?.[k] === 'string' && r.summary[k].trim() && r.summary[k].length <= 500) ? r : null;
 }
 
@@ -133,7 +153,8 @@ export function buildSummary(record, patient = {}) {
   const calculation = review ? null : waveformObservations(record);
   const result = {
     items: [item('heartRate', 'Частота сердца', hr.text), item('axis', 'Электрическая ось сердца', axis(record, review)),
-      item('waves', 'Патологические зубцы', waves(review, entries)), item('st', 'Подъём ST', st(review, entries)),
+      item('waves', 'Патологические зубцы', waves(review, entries)),
+      item('waveInversion', 'Инверсия зубцов — перевёрнутая форма', waveInversion(review, entries)), item('st', 'Подъём ST', st(review, entries)),
       item('rhythm', 'Ритм сердца', rhythm(review, entries)), item('extrasystoles', 'Экстрасистолы — внеочередные сокращения', extrasystoles(review, entries)),
       item('atrial', 'Предсердный ритм', atrialRhythm(review, entries, hr))],
     note: review ? 'Сводка включает проверенное заключение по этой записи.'
@@ -141,7 +162,7 @@ export function buildSummary(record, patient = {}) {
         : 'ИИ этой записи не оценивал. «Не определено» не означает «отклонений нет».',
   };
   if (calculation) {
-    result.items = result.items.map(row => ({ ...row, text: calculation.summary[row.key] }));
+    result.items = result.items.map(row => ({ ...row, text: calculation.summary[row.key] || row.text }));
     result.note = 'Предварительный расчёт по кривой: время и масштаб записи не подтверждены. Это не врачебное заключение; выводы относятся только к этому фрагменту.';
   }
   return result;

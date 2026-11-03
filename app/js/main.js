@@ -197,20 +197,17 @@ async function recordFromECG301(buffer, fileName) {
 
 const MODEL_KEYS = { 'heartwise/EfficientNetV2_77_Classes': 'efficientnet', 'heartwise/WCR_77_Classes': 'wcr', 'PKUDigitalHealth/ECGFounder': 'ecgfounder' };
 const MODEL_NAMES = { efficientnet: 'DeepECG SL (EfficientNetV2)', wcr: 'DeepECG SSL (WCR)', ecgfounder: 'ECGFounder' };
-// Print button: a separate A4 report (report.js), not the screen. Only the chosen network is printed.
+// Print only the short analysis; all model data stays in storage.
 function printButton(title, build, label = 'Печать', cls = '') {
   return btn(label, async () => {
     try {
-      let model = 'all';
-      try { model = localStorage.getItem(MODEL_PREF) || 'all'; } catch { /* print all */ }
-      await printReport(build({ labelsRu: state.labelsRu, model }), title);
+      await printReport(build({}), title);
     } catch (err) { tell('Не удалось подготовить печать: ' + err.message); }
   }, cls, 'print');
 }
-// The report for one ECG also shows its comparison with the ECG before it.
+// The printed result is the current short analysis, without numeric comparisons.
 function recordReportFor(patient, records, record, ctx) {
-  const sorted = sortByDate(records), older = sorted[sorted.indexOf(record) + 1];
-  return recordReport(patient, record, { ...ctx, previous: older ? compareRecords(older, record, { sex: patient.sex }) : null });
+  return recordReport(patient, record, ctx);
 }
 
 function aiEntry(report, extra = {}) {
