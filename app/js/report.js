@@ -5,6 +5,7 @@
 import { LEADS } from './ecg301.js';
 import { toMillivolts } from './signal.js';
 import { RULES } from './rules.js';
+import { buildSummary } from './summary.js';
 import { normalRange, rangeStatus, LEVEL_TEXT } from './compare.js';
 
 const esc = text => String(text ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -13,7 +14,6 @@ const r = v => Math.round(v * 100) / 100;  // SVG coordinates in mm, 0.01 mm is 
 
 export const DISCLAIMER = 'CardioAI — исследовательская программа. Результаты — технические оценки, а не диагноз. Решение принимает врач.';
 const FOOT = 'CardioAI — исследовательская программа; не диагноз, решение принимает врач.';
-const MODEL_NAMES = { efficientnet: 'DeepECG SL', wcr: 'DeepECG SSL', ecgfounder: 'ECGFounder' };
 const SEX = { M: 'мужской', F: 'женский' };
 
 function fmtDate(iso, withTime = false) {
@@ -186,19 +186,10 @@ function rrLine(record) {
   return `<p class="rhythm"><b>Ритм:</b> оценивает врач — автоматическая классификация ритма и экстрасистол не выполняется.${rr.length ? ` RR, мс: ${rr.map(v => num(v)).join(' · ')}.` : ''}</p>`;
 }
 
-function aiBlock(record, ctx) {
-  const entries = Object.entries(record.ai || {}).filter(([key]) => !ctx.model || ctx.model === 'all' || ctx.model === key);
-  if (!entries.length) return '';
-  const items = entries.map(([key, e]) => {
-    const t = e.thresholds;
-    const ranked = Object.entries(e.scores || {}).filter(([l, v]) => Number.isFinite(v) && (!t || (t[l] && v >= t[l])))
-      .sort((x, y) => (t ? y[1] / t[y[0]] - x[1] / t[x[0]] : y[1] - x[1])).slice(0, 5);
-    const list = ranked.length ? ranked.map(([l, v]) => `<li>«${esc(ctx.labelsRu?.[l] || l)}» — оценка ${num(v, 2)}${t ? ` (порог ${num(t[l], 2)})` : ''}</li>`).join('')
-      : '<li>Признаков выше порога модели нет.</li>';
-    return `<div class="model"><b>${esc(MODEL_NAMES[key] || e.model || key)}</b>${e.synthetic ? ' — технический тест на искусственном сигнале, не оценка этой ЭКГ' : ''}${e.research ? `<p class="small">${esc(e.note || 'Исследовательский расчёт: калибровка не подтверждена.')}</p>` : ''}${t ? '' : ' (у модели нет порогов — показаны наибольшие оценки)'}<ul>${list}</ul></div>`;
-  }).join('');
-  return `<section class="block ai"><h2>Автоматический анализ (исследовательские нейросети) — справочно</h2>
-<p class="small">Признаки, отмеченные моделью. Модели не проверены на файлах прибора ECG301. Оценка — не вероятность и не диагноз.</p><div class="models">${items}</div></section>`;
+function aiBlock(record, patient) {
+  const summary = buildSummary(record, patient);
+  return `<section class="block ai"><h2>Краткая сводка</h2><dl class="plain-summary">${summary.items.map(row =>
+    `<div><dt><b>${esc(row.label)}</b></dt><dd>${esc(row.text)}</dd></div>`).join('')}</dl><p class="small">${esc(summary.note)}</p></section>`;
 }
 
 function conclusion(lines) {
@@ -241,8 +232,8 @@ export function recordReport(patient, record, ctx = {}) {
 <p class="lead-line">${esc(c.headline)}</p>${items ? `<ul class="tight">${items}${more}</ul>` : ''}</section>`;
   }
   // Comparison and AI side by side, so the doctor's conclusion stays on the first page.
-  const ai = aiBlock(record, ctx);
-  body += compared && ai ? `<div class="duo">${compared}${ai}</div>` : compared + ai;
+  const ai = aiBlock(record, patient);
+  body += compared + ai;
   body += conclusion(ctx.lines ?? (compared && ai ? 3 : compared || ai ? 4 : 6));
   return document_(`ЭКГ ${fullName(patient)} ${fmtDate(record.recordedAt)}`, [body], patient, printedAt);
 }
@@ -274,9 +265,7 @@ ${c.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</section>`;
   // Fewer lines when the summary is long, so the conclusion stays on this page.
   body += conclusion(ctx.lines ?? Math.max(3, 6 - Math.floor(c.highlights.length / 5)));
   const legend = `<span class="key-now"></span> ЭКГ 2 (${esc(d2)}) &nbsp; <span class="key-before"></span> ЭКГ 1 (${esc(d1)})`;
-  const scoreRows = c.scores.filter(s => !ctx.model || ctx.model === 'all' || ctx.model === s.model)
-    .flatMap(s => s.changes.slice(0, 4).map(x => `<li>${esc(MODEL_NAMES[s.model] || s.modelName)}: «${esc(ctx.labelsRu?.[x.label] || x.label)}» ${num(x.a, 2)} → ${num(x.b, 2)}${x.crossed ? ' (пересекла порог)' : ''}</li>`));
-  const scores = scoreRows.length ? `<section class="block ai"><h2>Изменения оценок нейросетей — справочно</h2><ul>${scoreRows.join('')}</ul></section>` : '';
+  const scores = ''; // Raw model scores are kept in the data, not in the report.
   const pages = [body];
   if (c.waveform.available || scores) {
     let shape = runhead(patient, 'Сравнение ЭКГ · форма комплексов');
@@ -298,6 +287,8 @@ ${c.warnings.map(w => `<p class="warn">${esc(w)}</p>`).join('')}</section>`;
 
 // Monochrome first: black text and traces, light grey grid, emphasis by weight and symbols.
 const CSS = `
+.plain-summary{margin:0}.plain-summary>div{break-inside:avoid;margin:0 0 2mm}.plain-summary dd{margin:0}
+
 @page{size:A4 portrait;margin:8mm 10mm}
 *{box-sizing:border-box}
 html{-webkit-print-color-adjust:exact;print-color-adjust:exact}

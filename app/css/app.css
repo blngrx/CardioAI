@@ -247,3 +247,11 @@ dialog .actions{justify-content:flex-end}
 }
 @media print{:root{color-scheme:light;--bg:#fff;--surface-0:#fff;--surface-1:#fff;--surface-2:#f1f3f5;--border:#ccc;--text-1:#000;--text-2:#333;--text-3:#555;--accent:#164c88}
   body{background:#fff}header.top,button,.no-print,.back{display:none!important}section.card{break-inside:avoid;border:none;box-shadow:none}}
+
+/* A short result, without classifier scores or per-network lists. */
+.plain-summary dl{margin:0}
+.summary-row{padding:12px 0;border-bottom:1px solid var(--border)}
+.summary-row:first-child{padding-top:0}
+.summary-row:last-child{border-bottom:0}
+.summary-row dt{font-size:14px;font-weight:600;color:var(--text-2);margin-bottom:4px}
+.summary-row dd{margin:0;font-size:16px;line-height:1.55;max-width:80ch}
