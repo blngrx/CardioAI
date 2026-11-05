@@ -115,3 +115,33 @@ test('legacy seven-field waveform reports remain usable, without inventing inver
   assert.match(row(r, 'waveInversion'), /не определена/);
   assert.doesNotMatch(row(r, 'waveInversion'), /undefined/);
 });
+
+test('partial inversion review preserves the unassessed wave and normal aVR polarity', () => {
+  for (const wave of ['P', 'T']) {
+    const r = record({ interpretation: review({ waveInversion: {
+      [wave]: { status: 'present', leads: ['aVR'] }
+    } }) });
+    assert.match(row(r, 'waveInversion'), new RegExp(wave + ': отрицательный в aVR — обычное направление'));
+    const other = wave === 'P' ? 'T' : 'P';
+    assert.match(row(r, 'waveInversion'), new RegExp(other + ': инверсия отдельно не определена'));
+  }
+});
+
+test('T inversion hypothesis does not become a pathological Q wave finding', () => {
+  const r = record({ ai: { x: model({ 'T wave inversion': .9 }, { 'T wave inversion': .5 }) } });
+  assert.match(row(r, 'waves'), /Не определено/);
+  assert.match(row(r, 'waveInversion'), /ИИ предполагает инверсию T/);
+});
+
+test('sinus origin does not certify normal frequency or conduction', () => {
+  const r = record({ interpretation: review({ rhythm: { type: 'sinus', ventricularRatePerMinute: 120 } }) });
+  assert.match(row(r, 'heartRate'), /повышенная/);
+  assert.match(row(r, 'rhythm'), /Синусовый ритм/);
+  assert.doesNotMatch(row(r, 'rhythm'), /Обычный ритм|нормальный/);
+});
+
+test('axis gives quadrant without severity and treats the two 180-degree forms equally', () => {
+  assert.match(row(record({ measurements: { QRS_axis: -120 } }), 'axis'), /вверх и вправо/);
+  assert.equal(row(record({ measurements: { QRS_axis: -180 } }), 'axis'),
+    row(record({ measurements: { QRS_axis: 180 } }), 'axis'));
+});

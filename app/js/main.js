@@ -199,11 +199,15 @@ const MODEL_KEYS = { 'heartwise/EfficientNetV2_77_Classes': 'efficientnet', 'hea
 const MODEL_NAMES = { efficientnet: 'DeepECG SL (EfficientNetV2)', wcr: 'DeepECG SSL (WCR)', ecgfounder: 'ECGFounder' };
 // Print only the short analysis; all model data stays in storage.
 function printButton(title, build, label = 'Печать', cls = '') {
-  return btn(label, async () => {
-    try {
-      await printReport(build({}), title);
-    } catch (err) { tell('Не удалось подготовить печать: ' + err.message); }
+  const button = btn(label, async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    button.replaceChildren(icon('print'), 'Открываю печать…');
+    try { await printReport(build({}), title); }
+    catch (err) { await tell('Не удалось подготовить печать: ' + err.message); }
+    finally { button.disabled = false; button.replaceChildren(icon('print'), label); }
   }, cls, 'print');
+  return button;
 }
 // The printed result is the current short analysis, without numeric comparisons.
 function recordReportFor(patient, records, record, ctx) {

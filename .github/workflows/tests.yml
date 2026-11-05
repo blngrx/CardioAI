@@ -28,3 +28,7 @@ jobs:
       - name: Desktop program rules (no window, no downloads)
         working-directory: outputs/ecg-reader
         run: python test_desktop_program.py
+
+      - name: Authenticated desktop print transport (no real printer)
+        working-directory: outputs/ecg-reader
+        run: python test_printing.py

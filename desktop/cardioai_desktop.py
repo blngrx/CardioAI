@@ -95,7 +95,9 @@ class Api:
         if sys.platform == 'win32':
             os.startfile(str(target))
         elif sys.platform == 'darwin':
-            subprocess.Popen(['open', str(target)])
+            # An .html association can point to an editor. Safari is installed with macOS
+            # and can show the print dialog; check launch failure instead of reporting success.
+            subprocess.run(['open', '-a', 'Safari', str(target)], check=True, capture_output=True, timeout=10)
         else:
             webbrowser.open(target.as_uri())
         return str(target)
@@ -108,6 +110,7 @@ class BackgroundServer:
         self.server = None
         self.lock = threading.Lock()
         self.closed = False
+        self.report_opener = None
 
     def start(self):
         with self.lock:
@@ -123,6 +126,7 @@ class BackgroundServer:
             os.environ['CARDIOAI_EXCHANGE'] = '1'
         from deepecg_local_server import LocalServer
         server = LocalServer(int(os.environ.get('CARDIOAI_PORT', '0')))
+        server.report_opener = self.report_opener
         with self.lock:
             if self.closed:
                 server.server_close()
@@ -172,6 +176,7 @@ def main():
             backend.stop()
         return
     api = Api()
+    backend.report_opener = api.open_report
     webview.settings['ALLOW_DOWNLOADS'] = True
     # First let Cocoa/WinForms run and paint a window. Startup may touch cloud or network disks.
     api._window = webview.create_window('CardioAI', html=LOADING_HTML, js_api=api,

@@ -44,33 +44,36 @@ function heartRate(record, patient, review) {
 
 function axis(record, review) {
   const names = { normal: 'Обычное направление.', left: 'Отклонена влево.', right: 'Отклонена вправо.',
-    extreme: 'Направлена резко вверх.', anterior: 'Отклонена вперёд.', posterior: 'Отклонена назад.' };
+    extreme: 'Направлена вверх и вправо.', anterior: 'Отклонена вперёд.', posterior: 'Отклонена назад.' };
   if (Object.hasOwn(names, review?.axis?.direction)) return names[review.axis.direction];
-  const v = record.measurements?.QRS_axis;
-  if (!finite(v) || v < -180 || v > 180) return UNKNOWN;
+  const raw = record.measurements?.QRS_axis;
+  if (!finite(raw) || raw < -180 || raw > 180) return UNKNOWN;
+  const v = raw === -180 ? 180 : raw;
   const direction = v >= -30 && v <= 90 ? 'Обычное направление'
-    : v < -30 && v >= -90 ? 'Отклонена влево' : v > 90 ? 'Отклонена вправо' : 'Направлена резко вверх';
+    : v < -30 && v >= -90 ? 'Отклонена влево' : v > 90 ? 'Отклонена вправо' : 'Направлена вверх и вправо';
   return `${direction}${record.source === 'ecg301' ? ', по данным прибора' : ', по сохранённому показателю'}.`;
 }
 
 function waves(review, entries) {
   if (review?.pathologicalWaves?.status === 'present') return 'Выявлены изменённые зубцы, требующие оценки врача.';
   if (review?.pathologicalWaves?.status === 'absent') return 'Патологических зубцов на этой записи не выявлено.';
-  return suggests(entries, l => /^Q wave|^QS complex|^T wave inversion/.test(l))
+  return suggests(entries, l => /^Q wave|^QS complex/.test(l))
     ? 'ИИ предполагает изменения зубцов. Наличие патологических зубцов не подтверждено.' : UNKNOWN;
 }
 function waveInversion(review, entries) {
   const allowed = new Set(['I', 'II', 'III', 'aVR', 'aVL', 'aVF', 'V1', 'V2', 'V3', 'V4', 'V5', 'V6']);
   const parts = [];
+  const hasReviewedInversion = ['P', 'T'].some(wave =>
+    ['present', 'absent'].includes(review?.waveInversion?.[wave]?.status));
   for (const wave of ['P', 'T']) {
     const finding = review?.waveInversion?.[wave];
     if (finding?.status === 'absent') parts.push(`${wave}: инверсия на этой записи не выявлена.`);
     else if (finding?.status === 'present') {
       const leads = [...new Set(Array.isArray(finding.leads) ? finding.leads.filter(l => allowed.has(l)) : [])];
-      if (wave === 'T' && leads.length === 1 && leads[0] === 'aVR')
-        parts.push('T: отрицательный в aVR — обычное направление для этого отведения.');
+      if (leads.length === 1 && leads[0] === 'aVR')
+        parts.push(`${wave}: отрицательный в aVR — обычное направление для этого отведения.`);
       else parts.push(`${wave}: перевёрнутая форма${leads.length ? ' в ' + leads.join(', ') : '; отведения не уточнены'}.`);
-    }
+    } else if (hasReviewedInversion) parts.push(`${wave}: инверсия отдельно не определена.`);
   }
   if (parts.length) return parts.join(' ');
   return suggests(entries, l => /^T wave inversion/.test(l))
@@ -85,7 +88,7 @@ function st(review, entries) {
 }
 
 const RHYTHMS = {
-  sinus: 'Обычный ритм — импульсы идут из естественного водителя сердца.',
+  sinus: 'Синусовый ритм — импульсы идут из естественного водителя сердца. Частота указана отдельно.',
   atrial: 'Предсердный ритм — импульсы идут из другого участка предсердий.',
   junctional: 'Узловой ритм — импульсы идут из области соединения предсердий и желудочков.',
   ventricular: 'Желудочковый ритм — импульсы идут из желудочков.',

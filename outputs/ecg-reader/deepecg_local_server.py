@@ -116,6 +116,7 @@ class LocalServer(ThreadingHTTPServer):
         # TCPServer calls server_close even if binding fails. Cleanup must be ready first.
         self.setup = ModelSetup()
         self.exchange = None
+        self.report_opener = None  # desktop callback; no native JS bridge is required
         super().__init__(('127.0.0.1', port), Handler)
         self.token = secrets.token_hex(32)
         self.runs = Path(runs) if runs else APP / 'local-runs'
@@ -364,7 +365,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == '/api/status':
             return self.answer(200, dict(app='ECG301-DeepECG-local', version=4,
                                         models=self.server.models(), local_only=True,
-                                        storage=True, data_dir=str(self.server.store.root)))
+                                        storage=True, desktop_print=callable(self.server.report_opener),
+                                        data_dir=str(self.server.store.root)))
         if self.path == '/api/setup':
             return self.answer(200, self.server.setup.status(self.server.models()))
         if self.path == '/api/exchange':
@@ -459,6 +461,19 @@ class Handler(BaseHTTPRequestHandler):
             data = strict_json(self.rfile.read(size))
             if not isinstance(data, dict):
                 raise ValueError('Ожидается объект JSON')
+            if self.path == '/api/report':
+                if not callable(self.server.report_opener):
+                    return self.answer(409, {'error': 'Открытие печати доступно в настольной программе'})
+                name, html = data.get('name'), data.get('html')
+                if not isinstance(name, str) or not name.strip() or not isinstance(html, str) or not html.strip():
+                    raise ValueError('Не подготовлен текст для печати')
+                try:
+                    target = self.server.report_opener(name, html)
+                except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+                    return self.answer(502, {'error': 'Не удалось открыть печать: ' + str(exc)})
+                if not isinstance(target, str) or not target:
+                    return self.answer(502, {'error': 'Программа не подтвердила открытие отчёта'})
+                return self.answer(200, {'path': target})
             if self.path == '/api/audit':
                 raw = uploaded(data, 'record')
                 name = data.get('filename', '')

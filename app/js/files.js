@@ -27,26 +27,52 @@ export async function saveFile(text, name, mime = 'application/octet-stream') {
   return name;
 }
 
-// Print a ready report (a complete HTML document, see report.js). The desktop window and the Android
-// app have no print dialog: the desktop program opens the report in the system browser, which prints
-// it; on Android it is shared as a file to print from there. A desktop browser prints it from a hidden
-// frame; phones and Safari print the parent page instead, so there it opens in a new tab.
+// The local desktop server provides a checked report opener. WKWebView can lack
+// the pywebview bridge and a Safari UA token, so it must not fall into iframe.print().
+async function printThroughDesktopServer(name, html) {
+  const token = document.querySelector('meta[name="cardioai-token"]')?.content;
+  if (!token || token === '__TOKEN__') return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+  try {
+    const response = await fetch('/api/status', { signal: controller.signal, cache: 'no-store' });
+    if (!response.ok) throw Error('Не удалось проверить службу печати');
+    const status = await response.json();
+    if (!status.desktop_print) return null;
+    const opened = await fetch('/api/report', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-ECG-Token': token },
+      body: JSON.stringify({ name, html }), signal: controller.signal,
+    });
+    const result = await opened.json();
+    if (!opened.ok) throw Error(result.error || 'Не удалось открыть печать');
+    if (typeof result.path !== 'string' || !result.path) throw Error('Программа не подтвердила открытие отчёта');
+    return result.path;
+  } catch (err) {
+    if (err.name === 'AbortError') throw Error('Служба печати не ответила. Повторите попытку.');
+    throw err;
+  } finally { clearTimeout(timeout); }
+}
+
+// Print the short text report. Desktop opens Safari (Mac) / the associated app (Windows);
+// Android shares the file; ordinary browsers retain their own print path.
 export async function printReport(html, title) {
   const name = `CardioAI ${title}`.replace(/[^\p{L}\p{N} .-]+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) + '.html';
-  // Prints once, right after opening — not again when the saved file is reopened later.
   const autoPrint = `<script>if (Date.now() - ${Date.now()} < 120000) addEventListener('load', () => setTimeout(print, 400))</script>`;
-  if (window.pywebview?.api?.open_report) return window.pywebview.api.open_report(name, html.replace('</body>', autoPrint + '</body>'));
+  const printable = html.replace('</body>', autoPrint + '</body>');
+  const opened = await printThroughDesktopServer(name, printable);
+  if (opened !== null) return opened;
+  if (window.pywebview?.api?.open_report) return window.pywebview.api.open_report(name, printable);
   if (window.Capacitor?.isNativePlatform?.()) return saveFile(html, name, 'text/html');
   const ua = navigator.userAgent;
   if (/Android|iPhone|iPad|Mobile/.test(ua) || (/Safari\//.test(ua) && !/Chrome|Chromium|Edg\//.test(ua))) {
-    const url = URL.createObjectURL(new Blob([html.replace('</body>', autoPrint + '</body>')], { type: 'text/html' }));
+    const url = URL.createObjectURL(new Blob([printable], { type: 'text/html' }));
     const tab = window.open(url, '_blank');
     setTimeout(() => URL.revokeObjectURL(url), 120000);
     if (!tab) throw Error('браузер заблокировал новую вкладку — разрешите всплывающие окна для этого сайта');
     return name;
   }
   const frame = Object.assign(document.createElement('iframe'), { srcdoc: html, title });
-  frame.setAttribute('sandbox', 'allow-same-origin allow-modals');  // the report needs no scripts
+  frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
   await new Promise(resolve => { frame.onload = resolve; document.body.append(frame); });
   frame.contentWindow.addEventListener('afterprint', () => frame.remove());
