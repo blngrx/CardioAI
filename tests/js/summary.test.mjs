@@ -29,20 +29,20 @@ test('model scores cannot establish absence, severity, rate or ectopy frequency'
   const r = record({ ai: { wcr: model({ 'ST elevation (anterior - V3-V4)': .999, 'Premature ventricular complex': .99, Afib: .99 },
     { 'ST elevation (anterior - V3-V4)': .1, 'Premature ventricular complex': .1, Afib: .1 }) } });
   assert.doesNotMatch(row(r, 'st'), /выраженный|умеренный|незначительный|ST выявлен/);
-  assert.match(row(r, 'extrasystoles'), /не определены/);
+  assert.match(row(r, 'extrasystoles'), /требуют просмотра кривой/);
   assert.doesNotMatch(row(r, 'extrasystoles'), /частые|редкие|парами/);
-  assert.match(row(r, 'atrial'), /фибрилляцию/);
+  assert.match(row(r, 'atrial'), /фибрилляции/);
   assert.match(row(r, 'atrial'), /предсердий — не измерена/);
   assert.match(row(r, 'atrial'), /желудочков — 62 уд\/мин/);
   const negative = record({ ai: { wcr: model({ Afib: 0 }, { Afib: .5 }) } });
-  assert.match(row(negative, 'waves'), /Не определено/);
-  assert.match(row(negative, 'st'), /Не определено/);
+  assert.match(row(negative, 'waves'), /нужен просмотр кривой/);
+  assert.match(row(negative, 'st'), /нужен просмотр кривой/);
   assert.doesNotMatch(row(negative, 'extrasystoles'), /не выявлены/);
 });
 test('synthetic, foreign ECG and thresholdless output cannot create findings', () => {
   for (const entry of [model({ Afib: .99 }, { Afib: .1 }, { synthetic: true }),
     model({ Afib: .99 }, { Afib: .1 }, { sourceSha256: 'b'.repeat(64) }), model({ Afib: .99 }, null)]) {
-    assert.doesNotMatch(row(record({ ai: { x: entry } }), 'atrial'), /предполагает фибрилляцию/);
+    assert.doesNotMatch(row(record({ ai: { x: entry } }), 'atrial'), /Возможны признаки фибрилляции/);
   }
 });
 test('review provenance is mandatory and tied to the exact recording', () => {
@@ -52,7 +52,7 @@ test('review provenance is mandatory and tied to the exact recording', () => {
   for (const change of [{ sourceSha256: 'b'.repeat(64) }, { reviewedBy: '' }, { reviewedAt: '' }, { basis: 'model-score' }]) {
     const other = { ...r, interpretation: { ...r.interpretation, ...change } };
     assert.equal(reviewedInterpretation(other), null);
-    assert.match(row(other, 'waves'), /Не определено/);
+    assert.match(row(other, 'waves'), /нужен просмотр кривой/);
   }
 });
 test('reviewed AF/flutter keep atrial activity and ventricular contractions separate', () => {
@@ -81,15 +81,15 @@ test('report uses the same concise content, escapes text, and has no score table
   const c = compareRecords({ ...r, id: 'old', recordedAt: '2026-11-02T15:38:16' }, r);
   assert.doesNotMatch(comparisonReport({}, c), /SECRET-LABEL|0[.,]9876|Изменения оценок нейросетей/);
 });
-test('a waveform research result stays explicitly preliminary and bound to its source', () => {
+test('archived free-text research cannot override the current calculation', () => {
   const r = record();
   const text = Object.fromEntries(buildSummary(r).items.map(x => [x.key, 'Измеренное наблюдение: '+x.key]));
   r.waveformResearch = { schemaVersion: 1, basis: 'waveform-research', clinicalValidation: false, sourceSha256: hash,
     method: 'synthetic test', assumptions: { fs_hz: 200, microvolts_per_count: 1 }, summary: text };
-  assert.equal(row(r, 'st'), text.st);
-  assert.match(buildSummary(r).note, /Предварительный расчёт/);
+  assert.notEqual(row(r, 'st'), text.st);
+  assert.match(buildSummary(r).note, /Исследовательский результат/);
   r.waveformResearch.sourceSha256 = 'b'.repeat(64);
-  assert.match(row(r, 'st'), /Не определено/);
+  assert.match(row(r, 'st'), /нужен просмотр кривой/);
   r.waveformResearch.sourceSha256 = hash;
   r.interpretation = review({ stElevation: { status: 'absent' } });
   assert.match(row(r, 'st'), /не выявлен/);
@@ -106,13 +106,13 @@ test('P and T inversion are separate observations, not a blanket pathology diagn
   r.interpretation.waveInversion.T = { status: 'absent' };
   assert.match(row(r, 'waveInversion'), /T: инверсия на этой записи не выявлена/);
 });
-test('legacy seven-field waveform reports remain usable, without inventing inversion', () => {
+test('legacy free text is retained in data without replacing current measurements', () => {
   const r = record();
   const summary = Object.fromEntries(buildSummary(r).items.filter(x => x.key !== 'waveInversion').map(x => [x.key, 'Наблюдение '+x.key]));
   r.waveformResearch = { schemaVersion: 1, basis: 'waveform-research', clinicalValidation: false, sourceSha256: hash,
     method: 'test', assumptions: { fs_hz: 200, microvolts_per_count: 1 }, summary };
-  assert.equal(row(r, 'axis'), summary.axis);
-  assert.match(row(r, 'waveInversion'), /не определена/);
+  assert.match(row(r, 'axis'), /влево/);
+  assert.match(row(r, 'waveInversion'), /нужен просмотр кривой/);
   assert.doesNotMatch(row(r, 'waveInversion'), /undefined/);
 });
 
@@ -129,8 +129,8 @@ test('partial inversion review preserves the unassessed wave and normal aVR pola
 
 test('T inversion hypothesis does not become a pathological Q wave finding', () => {
   const r = record({ ai: { x: model({ 'T wave inversion': .9 }, { 'T wave inversion': .5 }) } });
-  assert.match(row(r, 'waves'), /Не определено/);
-  assert.match(row(r, 'waveInversion'), /ИИ предполагает инверсию T/);
+  assert.match(row(r, 'waves'), /нужен просмотр кривой/);
+  assert.match(row(r, 'waveInversion'), /Возможна инверсия T/);
 });
 
 test('sinus origin does not certify normal frequency or conduction', () => {
