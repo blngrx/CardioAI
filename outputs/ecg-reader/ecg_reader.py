@@ -6,6 +6,7 @@ import argparse, csv, hashlib, json, math, struct
 from pathlib import Path
 
 SIZE=39381
+SIZES=(SIZE, 72981)
 LEADS=['I','II','III','aVR','aVL','aVF','V1','V2','V3','V4','V5','V6']
 
 def correlation(a,b):
@@ -15,17 +16,18 @@ def correlation(a,b):
     return sum(x*y for x,y in zip(aa,bb))/den if den else 0
 
 def read_record(blob):
-    if len(blob)!=SIZE: raise ValueError(f'Unsupported layout: {len(blob)} bytes; expected {SIZE}. File left unchanged.')
+    if len(blob) not in SIZES: raise ValueError(f'Unsupported layout: {len(blob)} bytes; expected {SIZES}. File left unchanged.')
     rid=blob[6:20].decode('ascii',errors='strict')
     if not rid.isdigit(): raise ValueError('Invalid record identifier')
     def channels(start,n):
         nums=struct.unpack_from('<'+str(n*12)+'H',blob,start)
         if any(x>4095 for x in nums): raise ValueError('Signal outside candidate 12-bit layout. Unsupported file.')
         return [list(nums[i*n:(i+1)*n]) for i in range(12)]
-    a=channels(79,1000); b=channels(24981,600)
+    a=channels(79,1000); b=channels(24981,(len(blob)-24981)//24)
     hr,pr,qrs,qt,qtc=struct.unpack_from('<5H',blob,24079)
     rr=list(struct.unpack_from('<11H',blob,24089))
-    if not (20<=hr<=300 and 20<=qrs<=400 and 100<=qt<=800 and all(200<=v<=3000 for v in rr)):
+    while rr and rr[-1] == 0: rr.pop()
+    if not (20<=hr<=300 and 20<=qrs<=400 and 100<=qt<=800 and rr and all(200<=v<=3000 for v in rr)):
         raise ValueError('Metadata does not match supported candidate layout')
     scores={}
     for name,y in [('A',a),('B',b)]:
