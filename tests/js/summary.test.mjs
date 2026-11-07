@@ -45,6 +45,16 @@ test('synthetic, foreign ECG and thresholdless output cannot create findings', (
     assert.doesNotMatch(row(record({ ai: { x: entry } }), 'atrial'), /Возможны признаки фибрилляции/);
   }
 });
+test('unbound legacy reports remain archival and cannot create summary findings', () => {
+  const r = record({ ai: { old: { scores: { Afib: .99 }, thresholds: { Afib: .1 } } } });
+  assert.doesNotMatch(row(r, 'atrial'), /Возможны признаки фибрилляции/);
+});
+test('ECGFounder concept mapping still requires its own label-specific threshold', () => {
+  const r = record({ ai: { founder: model({ 'ATRIAL FIBRILLATION': .9 }, { 'ATRIAL FIBRILLATION': .7 }) } });
+  assert.match(row(r, 'atrial'), /Возможны признаки фибрилляции/);
+  r.ai.founder.thresholds = { Afib: .1 };
+  assert.doesNotMatch(row(r, 'atrial'), /Возможны признаки фибрилляции/);
+});
 test('review provenance is mandatory and tied to the exact recording', () => {
   const r = record({ interpretation: review({ pathologicalWaves: { status: 'absent' } }) });
   assert.ok(reviewedInterpretation(r));
@@ -75,7 +85,7 @@ test('reviewed ectopy preserves origin, recording scope and periodicity', () => 
 });
 test('report uses the same concise content, escapes text, and has no score table', () => {
   const r = record({ ai: { wcr: model({ 'SECRET-LABEL': .9876 }, { 'SECRET-LABEL': .01 }) } });
-  const html = recordReport({ surname: '<script>BAD</script>' }, r);
+  const html = recordReport({ surname: '<script>BAD</script>' }, r, { compact: true });
   for (const entry of buildSummary(r).items) assert.ok(html.includes(entry.text));
   assert.doesNotMatch(html, /SECRET-LABEL|0[.,]9876|пересекла порог|<script>BAD/);
   const c = compareRecords({ ...r, id: 'old', recordedAt: '2026-11-02T15:38:16' }, r);

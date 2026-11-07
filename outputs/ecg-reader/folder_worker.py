@@ -121,7 +121,7 @@ def record_from_ecg301(blob, file_name):
     return dict(id=os.urandom(16).hex(), source='ecg301', fileName=file_name, sha256=r['sha256'],
                 deviceRecordId=r['record_id'], recordedAt=date_from_record_id(r['record_id']), device=device,
                 measurements=derive_measurements(device),
-                signal=dict(block='B', fs=FS_B, leads=r['block_B'],
+                signal=dict(block='B', fs=FS_B, timingVerified=False, simultaneousVerified=False, leads=r['block_B'],
                             calibration=dict(microvoltsPerCount=MICROVOLTS_PER_COUNT, zeroCounts=ZERO_COUNTS, verified=False)),
                 checks=dict(limbIdentity=r['checks']['limb_identity_correlation']), ai={},
                 devicePatient=device_patient(blob),

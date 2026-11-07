@@ -13,14 +13,15 @@ function record(id) {
 }
 const patient = { surname: 'Иванов', name: 'Пётр', birthDate: '1958-04-12', sex: 'M' };
 
-test('one-ECG printout contains only identity and the eight short findings', () => {
+test('default one-ECG printout contains the conclusion, metrics and all fourteen Orlov sections', () => {
   const html = recordReport(patient, record('20261023170734'), { printedAt: '2026-10-29T16:00:00' });
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /Иванов Пётр/);
-  assert.match(html, /Частота сердца/);
-  assert.match(html, /Инверсия зубцов/);
-  assert.equal((html.match(/class="finding"/g) || []).length, 8);
-  assert.doesNotMatch(html, /<svg|<table|Интервал PQ|Фридеричиа|\d\s*мс|мм\/с|Заключение врача/);
+  assert.match(html, /Итоговое ИИ-заключение/);
+  assert.match(html, /QTc Фридеричиа/);
+  assert.equal((html.match(/data-orlov=/g) || []).length, 14);
+  assert.match(html, /<table/);
+  assert.doesNotMatch(html, /<svg|Заключение врача/);
 
 });
 
@@ -34,10 +35,10 @@ test('a record without a signal still prints, without the ECG grid', () => {
   const r = { ...record('20261023170734'), signal: null };
   const html = recordReport(patient, r);
   assert.doesNotMatch(html, /<svg/);
-  assert.match(html, /Краткий анализ ЭКГ/);
+  assert.match(html, /Итоговое ИИ-заключение/);
 });
 
-test('two-ECG printout contains both short analyses without technical comparisons', () => {
+test('two-ECG printout contains both complete Orlov reports', () => {
   const a = record('20260301100000'), b = record('20261023170734');
   a.ai = { wcr: { model: 'WCR', scores: { X: 0.1 }, thresholds: { X: 0.5 } } };
   b.ai = { wcr: { model: 'WCR', scores: { X: 0.9 }, thresholds: { X: 0.5 } } };
@@ -45,8 +46,8 @@ test('two-ECG printout contains both short analyses without technical comparison
   const html = comparisonReport(patient, c, { model: 'ecgfounder' });
   assert.match(html, /01\.03\.2026/);
   assert.match(html, /23\.10\.2026/);
-  assert.match(html, /Предыдущая ЭКГ — краткий анализ/);
-  assert.equal((html.match(/class="finding"/g) || []).length, 16);
-  assert.doesNotMatch(html, /<svg|<table|Средний комплекс|Оценка|Порог/);
+  assert.match(html, /Предыдущая ЭКГ — ИИ-заключение/);
+  assert.equal((html.match(/data-orlov=/g) || []).length, 28);
+  assert.doesNotMatch(html, /<svg|Средний комплекс/);
   assert.doesNotMatch(html, /Изменения оценок нейросетей/);
 });

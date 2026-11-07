@@ -17,7 +17,7 @@ function average(x, radius) {
     return (prefix[b] - prefix[a]) / (b - a);
   });
 }
-function candidate(raw, fs, index) {
+function candidate(raw, fs, index, minEvents) {
   if (!Array.isArray(raw) || raw.some(v => !finite(v))) return null;
   const baseline = average(raw, Math.round(.125 * fs));
   const high = raw.map((v, i) => v - baseline[i]);
@@ -34,7 +34,7 @@ function candidate(raw, fs, index) {
     peaks.push(best);
   }
   const amplitude = median(peaks.map(p => Math.abs(high[p])));
-  if (peaks.length < 4 || !(amplitude > 0) || amplitude < 5 * noise) return null;
+  if (peaks.length < minEvents || !(amplitude > 0) || amplitude < 5 * noise) return null;
   return { index, peaks, high, raw, snr: noise > 0 ? amplitude / noise : Infinity };
 }
 function agreement(a, b, tolerance) {
@@ -48,14 +48,15 @@ function agreement(a, b, tolerance) {
   return 2 * matches / (a.length + b.length);
 }
 
-export function measureWaveform(signal) {
+export function measureWaveform(signal, { minDurationSeconds = 4, minEvents = 4 } = {}) {
   const result = { method: WAVEFORM_METHOD, clinicalValidation: false, available: false };
   const fs = signal?.fs, leads = signal?.leads;
   if (!finite(fs) || fs < 100 || fs > 2000 || !Array.isArray(leads) || leads.length !== 12) return result;
   const n = leads[0]?.length;
   // Bound synchronous work in the renderer. Longer recordings need a worker.
-  if (!Number.isInteger(n) || n < 4 * fs || n > 30000 || leads.some(l => !Array.isArray(l) || l.length !== n)) return result;
-  const candidates = [0, 1, 7, 9, 10].map(i => candidate(leads[i], fs, i)).filter(Boolean);
+  if (!finite(minDurationSeconds) || minDurationSeconds < 2 || !Number.isInteger(minEvents) || minEvents < 3
+      || !Number.isInteger(n) || n < minDurationSeconds * fs || n > 30000 || leads.some(l => !Array.isArray(l) || l.length !== n)) return result;
+  const candidates = [0, 1, 7, 9, 10].map(i => candidate(leads[i], fs, i, minEvents)).filter(Boolean);
   let selected = null, concordance = 0;
   for (const c of candidates) {
     const support = candidates.filter(other => other !== c && agreement(c.peaks, other.peaks, .08 * fs) >= .8).length;
@@ -69,7 +70,7 @@ export function measureWaveform(signal) {
   Object.assign(result, { available: true, fs, timingVerified: signal.timingVerified === true,
     amplitudeVerified: signal.calibration?.verified === true, referenceLead: selected.index,
     qrsSamples: peaks, rrSeconds: rr, heartRate: 60 / meanRR, rrCV: sdRR / meanRR,
-    agreeingLeads: concordance + 1 });
+    agreeingLeads: concordance + 1, shortRecording: n < 4 * fs });
   return result;
 }
 

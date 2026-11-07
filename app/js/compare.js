@@ -213,12 +213,12 @@ export function compareRecords(a, b, { sex, rules = RULES } = {}) {
     for (const m of measurements) if (m.key.endsWith('_axis') || m.key === 'QRS_T_angle_deg') m.level = cap(m.level, 'small');
   }
   const minutes = a.recordedAt && b.recordedAt ? (new Date(b.recordedAt) - new Date(a.recordedAt)) / 60000 : null;
-  if (minutes !== null && minutes < rules.minIntervalMinutes) warnings.push('Записи сделаны с разницей менее 30 минут — изменения, скорее всего, отражают погрешность.');
+  if (minutes !== null && minutes < rules.minIntervalMinutes) warnings.push('Записи сделаны с разницей менее 30 минут. Короткий интервал не определяет причину изменений; учитывайте симптомы, качество и условия записи.');
   if (waveform.available && waveform.fewBeats) warnings.push(`Мало комплексов для среднего (${Math.min(waveform.beatsA, waveform.beatsB)}; надёжно — от ${rules.waveform.minBeatsReliable}). Сравнение формы ориентировочное.`);
   // Wide QRS (bundle branch block range) changes ST-T secondarily; do not read it as ischaemia.
   const qrsB = b.measurements?.QRS_ms;
   if (waveform.available && Number.isFinite(qrsB) && qrsB >= rules.waveform.secondaryQrsMs && waveform.findings.some(f => f.kind !== 'shape')) {
-    for (const f of waveform.findings) if (f.kind !== 'shape') { f.level = cap(f.level, 'minor'); f.text += ' (вторично при широком QRS)'; }
+    for (const f of waveform.findings) if (f.kind !== 'shape') { f.level = cap(f.level, 'minor'); f.text += ' (интерпретация ограничена широким QRS)'; }
     warnings.push('QRS ≥120 мс: изменения ST и T могут быть вторичными из-за нарушения проводимости.');
   }
   if (waveform.available && !waveform.calibrationVerified) warnings.push('Масштаб сигнала в мВ не подтверждён производителем — значения ST/T в мВ приблизительны.');

@@ -2,6 +2,7 @@
 // severity grades, beat counts, or evidence that a finding is absent.
 import { ageAt } from './measure.js';
 import { measureWaveform } from './waveform.js';
+import { canonicalModelLabel } from './analysis2.js';
 
 const finite = v => typeof v === 'number' && Number.isFinite(v);
 const rate = v => finite(v) && v >= 10 && v <= 400;
@@ -21,12 +22,12 @@ export function reviewedInterpretation(record) {
 
 function modelEntries(record) {
   return Object.values(record.ai || {}).filter(e => e && !e.synthetic && e.scores && typeof e.scores === 'object'
-    && (!e.sourceSha256 || (record.sha256 && e.sourceSha256 === record.sha256)));
+    && /^[a-f0-9]{64}$/.test(record.sha256 || '') && e.sourceSha256 === record.sha256);
 }
 function suggests(entries, match) {
   // A score without the authors' operating threshold is not a binary finding.
   return entries.some(e => Object.entries(e.scores).some(([label, value]) =>
-    match(label) && finite(value) && value >= 0 && value <= 1
+    match(canonicalModelLabel(label)) && finite(value) && value >= 0 && value <= 1
     && finite(e.thresholds?.[label]) && e.thresholds[label] > 0 && e.thresholds[label] < 1
     && value >= e.thresholds[label]));
 }

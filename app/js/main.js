@@ -8,8 +8,12 @@ import { trendChart, beatOverlay, stripChart } from './charts.js';
 import { toMillivolts } from './signal.js';
 import { saveFile, readFile, printReport } from './files.js';
 import { fileDeviceRecord, linkDeviceName } from './autofile.js';
-import { recordReport, comparisonReport } from './report.js';
-import { buildSummary } from './summary.js';
+import { recordReport, comparisonReport, REPORT_VARIANTS } from './report.js';
+import { analyzeECG } from './analysis2.js';
+import { detailedAnalysisReport, ANALYSIS2_LABELS, FINDING_STATUS, STAGE_STATUS } from './analysis2-report.js';
+import { buildOrlovConclusion } from './orlov.js';
+import { ORLOV_SOURCE_LABELS, formatOrlovValue } from './orlov-report.js';
+import { buildHumanSummary } from './human-report.js';
 
 const state = { store: null, status: null, labelsRu: {}, thresholds: {}, lastImport: null };
 const view = document.getElementById('view');
@@ -189,7 +193,7 @@ async function recordFromECG301(buffer, fileName) {
   return {
     id: newId(), source: 'ecg301', fileName, sha256: await sha256Hex(buffer), deviceRecordId: parsed.recordId, devicePatient: parsed.patient,
     recordedAt: parsed.recordedAt, device: parsed.device, measurements: deriveMeasurements(parsed.device),
-    signal: { block: 'B', fs: ASSUMED.fsB, leads: parsed.blocks.B,
+    signal: { block: 'B', fs: ASSUMED.fsB, timingVerified: false, simultaneousVerified: false, leads: parsed.blocks.B,
       calibration: { microvoltsPerCount: ASSUMED.microvoltsPerCount, zeroCounts: ASSUMED.zeroCounts, verified: false } },
     checks: parsed.checks, ai: {}, createdAt: new Date().toISOString(),
   };
@@ -197,7 +201,7 @@ async function recordFromECG301(buffer, fileName) {
 
 const MODEL_KEYS = { 'heartwise/EfficientNetV2_77_Classes': 'efficientnet', 'heartwise/WCR_77_Classes': 'wcr', 'PKUDigitalHealth/ECGFounder': 'ecgfounder' };
 const MODEL_NAMES = { efficientnet: 'DeepECG SL (EfficientNetV2)', wcr: 'DeepECG SSL (WCR)', ecgfounder: 'ECGFounder' };
-// Print only the short analysis; all model data stays in storage.
+// The main print action uses the same complete conclusion as the record screen.
 function printButton(title, build, label = 'Печать', cls = '') {
   const button = btn(label, async () => {
     if (button.disabled) return;
@@ -209,9 +213,25 @@ function printButton(title, build, label = 'Печать', cls = '') {
   }, cls, 'print');
   return button;
 }
-// The printed result is the current short analysis, without numeric comparisons.
+// Supply the patient's previous ECG to the shared report generator.
 function recordReportFor(patient, records, record, ctx) {
-  return recordReport(patient, record, ctx);
+  const index = records.findIndex(r => r.id === record.id);
+  return recordReport(patient, record, { ...ctx, previous: index >= 0 ? records[index + 1] : null });
+}
+
+function reportFormatControls(patient, records, record, label = 'Печать', cls = '') {
+  const select = h('select', { 'aria-label': 'Вариант отчёта', 'data-report-format': true },
+    REPORT_VARIANTS.map(v => h('option', { value: v.key }, v.label)));
+  select.value = 'orlov';
+  select.addEventListener('change', () => {
+    const preview = document.getElementById('human-report');
+    if (select.value === 'human' && preview) {
+      preview.open = true;
+      preview.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  });
+  return h('div', { class: 'row no-print report-variants' }, select,
+    printButton(`ЭКГ ${fullName(patient)} ${fmtDate(record.recordedAt)}`, ctx => recordReportFor(patient, records, record, { ...ctx, format: select.value }), label, cls));
 }
 
 function aiEntry(report, extra = {}) {
@@ -220,7 +240,8 @@ function aiEntry(report, extra = {}) {
   const weightsSha = report.weights?.sha256 || report.weights?.finetuned?.sha256 || null;
   // Older reports have no thresholds: on the desktop take them from the installed upstream.
   const thresholds = report.thresholds || (Object.keys(state.thresholds[key] || {}).length ? state.thresholds[key] : null);
-  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, research: report.research === true, note: report.note, assumptions: report.assumptions, sourceSha256: report.source_sha256, weightsSha,
+  const sourceSha256 = report.source_sha256 || report.source?.source_sha256;
+  return [key, { model: MODEL_NAMES[key] || report.model, scores: report.scores, thresholds, thresholdSource: report.threshold_source || (thresholds ? 'DeepECG_Docker 77_tasks_final.json' : null), ranges: report.ranges, research: report.research === true, note: report.note, assumptions: report.assumptions, sourceSha256, weightsSha,
     synthetic: report.synthetic_test === true, attachedAt: new Date().toISOString(), ...extra }];
 }
 
@@ -411,23 +432,54 @@ function outsideCount(r, sex) {
   return RULES.measurements.filter(m => { const st = rangeStatus(r.measurements?.[m.key], m, sex); return st && st !== 'normal'; }).length;
 }
 
-// One short summary, shared with the printable report. No score tables.
-function aiSummary(record, patient) {
-  const summary = buildSummary(record, patient);
-  return h('div', { class: 'plain-summary' },
-    h('dl', {}, summary.items.map(row => h('div', { class: 'summary-row', 'data-summary': row.key },
-      h('dt', {}, row.label), h('dd', {}, row.text)))),
-    h('p', { class: 'small gap' }, summary.note));
+// One full interpretation, shared with the printable report. Raw model outputs
+// and method limitations are kept after the clinical sections.
+function aiSummary(record, patient, { previous = null, expanded = false } = {}) {
+  const conclusion = buildOrlovConclusion(record, patient, { previous });
+  const body = h('div', { class: 'plain-summary' },
+    h('ol', { class: 'orlov-impression' }, conclusion.impression.map(text => h('li', {}, text))),
+    h('p', {}, h('strong', {}, conclusion.classification + '.')));
+  if (conclusion.conflicts.length) body.append(notice(conclusion.conflicts.map(c => c.text).join(' ')));
+  body.append(h('details', { open: expanded, class: 'gap' }, h('summary', {}, 'Полный разбор по Орлову · 14 разделов'),
+    h('h3', {}, 'Измеренные и рассчитанные показатели'), h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'Показатель'), h('th', {}, 'Значение'), h('th', {}, 'Источник'))),
+      h('tbody', {}, Object.values(conclusion.measurements).map(m => h('tr', {}, h('td', {}, m.label),
+        h('td', {}, (m.provisional ? '≈ ' : '') + formatOrlovValue(m.value, m.unit) + (m.unit ? ' ' + m.unit : '')), h('td', {}, ORLOV_SOURCE_LABELS[m.source] || (m.provisional ? 'Кривая, предварительно' : 'Расчёт'))))))),
+    conclusion.sections.map((s, i) => h('section', { class: 'orlov-section', 'data-orlov': s.key }, h('h3', {}, `${i + 1}. ${s.title}`),
+      s.paragraphs.map(text => h('p', {}, text))))));
+  body.append(h('details', { class: 'gap no-print' }, h('summary', {}, 'Источники и расчёты'),
+    conclusion.models.map(m => h('div', {}, h('h3', {}, m.name),
+      h('p', {}, m.reason || `${m.outputs} выходов; ${m.thresholded.length} пороговых признаков.`),
+      m.eligible && m.ranked.some(r => r.ru !== r.label) ? h('p', {}, 'Выше ранжированы: ' + m.ranked.filter(r => r.ru !== r.label).map(r => r.ru).join('; ') + '. Это не равнозначно установленным диагнозам.') : null,
+      m.thresholded.length ? h('details', {}, h('summary', {}, 'Все пороговые ответы'), h('ul', {}, m.thresholded.filter(f => f.ru !== f.label).map(f => h('li', {}, f.ru + '; ранг ' + f.rank)))) : null)),
+    h('p', { class: 'small' }, conclusion.version)));
+  const saved = h('p', { class: 'small gap orlov-save-status', role: 'status' });
+  const saveConclusion = btn('Сохранить заключение в историю', async () => {
+    saveConclusion.disabled = true;
+    try {
+      const conclusionHistory = [...(record.conclusionHistory || []), { ...conclusion, calculatedAt: new Date().toISOString() }];
+      await state.store.saveRecord({ ...record, conclusionHistory });
+      record.conclusionHistory = conclusionHistory;
+      saved.textContent = 'Итоговое заключение сохранено в истории этой ЭКГ.';
+    } catch (err) { saved.textContent = 'Не удалось сохранить: ' + err.message; }
+    finally { saveConclusion.disabled = false; }
+  }, '', 'save');
+  body.append(h('div', { class: 'actions gap no-print' }, saveConclusion,
+    btn('Сохранить итоговое заключение JSON', () => saveFile(JSON.stringify(conclusion, null, 2), `ECG-conclusion-${record.id}.json`, 'application/json'), '', 'save')), saved);
+  body.append(h('details', { class: 'gap orlov-limitations' }, h('summary', {}, 'Ограничения заключения'),
+    h('ul', {}, [...conclusion.limitations.map(l => l.text), ...(conclusion.technical.analysis.limitations || [])].map(text => h('li', {}, text)))));
+  body.append(h('p', { class: 'small gap' }, conclusion.note));
+  return body;
 }
 
 // The newest ECG with its key values and AI result: the first thing a doctor looks for.
 function latestCard(patient, records) {
   const r = records[0];
   return card(h('div', { class: 'card-head' }, h('div', {}, h('h2', {}, 'Последняя ЭКГ'), h('p', { class: 'muted' }, fmtDate(r.recordedAt, true)))),
-    h('h3', {}, 'Краткая сводка'), aiSummary(r, patient),
+    h('h3', {}, 'Итоговое ИИ-заключение'), aiSummary(r, patient, { previous: records[1] }),
     h('div', { class: 'actions' },
       btn('Открыть ЭКГ', () => go(`#/record/${patient.id}/${r.id}`), 'primary', 'ecg'),
-      printButton(`ЭКГ ${fullName(patient)} ${fmtDate(r.recordedAt)}`, ctx => recordReportFor(patient, records, r, ctx))));
+      reportFormatControls(patient, records, r)));
 }
 
 // The last three ECGs side by side; arrows mark a moderate or marked change from the ECG before.
@@ -579,9 +631,11 @@ async function viewRecord(pid, rid) {
   const parts = [backLink('#/patient/' + pid, fullName(patient)),
     pageHead('ЭКГ ' + fmtDate(record.recordedAt, true), [fullName(patient), SOURCE[record.source]].filter(Boolean).join(' · '),
       older ? btn('Сравнить с предыдущей', () => go(`#/compare/${pid}/${older.id}/${record.id}`), '', 'compare') : null,
-      printButton(`ЭКГ ${fullName(patient)} ${fmtDate(record.recordedAt)}`, ctx => recordReportFor(patient, records, record, ctx), 'Печать', 'primary')),
+      reportFormatControls(patient, records, record, 'Печать', 'primary')),
     record.notes ? h('p', { class: 'muted' }, record.notes) : null];
-  parts.push(aiCard(patient, record));
+  parts.push(humanLanguageCard(patient, record, older));
+  parts.push(aiCard(patient, record, older));
+  parts.push(detailedAnalysisCard(patient, record, older));
   if (record.signal) {
     parts.push(card(h('h2', {}, 'Кривая ЭКГ'), stripChart(toMillivolts(record.signal.leads, record.signal.calibration), record.signal.fs, LEADS),
       record.signal.calibration?.verified ? null : h('p', { class: 'small gap' }, 'Масштаб в мВ приблизительный. Форму кривой оценивать можно.')));
@@ -602,17 +656,82 @@ async function viewRecord(pid, rid) {
   view.replaceChildren(...parts.filter(Boolean));
 }
 
-function aiCard(patient, record) {
+function humanLanguageCard(patient, record, previous) {
+  const summary = buildHumanSummary(record, patient, { previous });
+  const details = h('details', { class: 'fold', id: 'human-report' }, h('summary', {}, 'Человеческий язык · экспериментальный вариант на одной странице'));
+  const body = h('div', { class: 'fold-body' }, h('p', { class: 'human-lead' }, summary.lead));
+  if (summary.alert) body.append(notice(summary.alert));
+  body.append(h('div', { class: 'human-preview-metrics', style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:16px 0' },
+    summary.metrics.map(m => h('div', {}, h('span', { class: 'small' }, m.label), h('div', {}, h('strong', {}, m.value)), h('span', { class: 'small' }, m.explanation)))));
+  body.append(h('h3', {}, 'Что важно в этой записи'), h('dl', {}, summary.observations.map(o => h('div', { class: 'summary-row', 'data-human': o.key },
+    h('dt', {}, o.label), h('dd', {}, o.text)))));
+  body.append(h('h3', {}, 'Что уточнить'), h('ul', {}, summary.nextSteps.map(t => h('li', {}, t))),
+    h('div', { class: 'actions' }, printButton(`Человеческий язык ${fullName(patient)}`, () => recordReport(patient, record, { format: 'human', previous }), 'Печать — Человеческий язык', 'primary')),
+    h('div', { class: 'small gap' }, summary.limits.map(t => h('p', {}, t))));
+  details.append(body); return details;
+}
+
+function detailedAnalysisCard(patient, record, previous) {
+  const analysis = analyzeECG(record, patient, { previous });
+  const details = h('details', { class: 'fold', id: 'analysis2' }, h('summary', {}, 'Подробный анализ ЭКГ · Алгоритм 2'));
+  const body = h('div', { class: 'fold-body' });
+  body.append(notice('Предварительные измерения по кривой. Для каждого показателя отдельно проверяются исходные данные и возможность оценки.', 'info'));
+  body.append(h('ul', {}, analysis.limitations.map(text => h('li', {}, text))));
+  body.append(h('h3', {}, 'Измерения по кривой'), h('div', { class: 'scroll' }, h('table', {},
+    h('thead', {}, h('tr', {}, h('th', {}, 'Показатель'), h('th', {}, 'Значение'), h('th', {}, 'Основание'))),
+    h('tbody', {}, Object.entries(analysis.measurements).map(([key, m]) => h('tr', {},
+      h('td', {}, ANALYSIS2_LABELS[key] || key), h('td', {}, m.value === null ? 'Не измерено' : val(m.value, m.unit)),
+      h('td', {}, m.value === null ? m.reason : m.verified ? 'По проверенным данным' : 'Предварительно')))))));
+  body.append(h('h3', {}, 'Применимость критериев'), h('dl', {}, analysis.findings.map(f => h('div', { class: 'summary-row' },
+    h('dt', {}, f.label), h('dd', {}, FINDING_STATUS[f.status], f.reason ? '. ' + f.reason : '')))));
+  body.append(h('details', {}, h('summary', {}, 'Качество отведений и ход анализа'),
+    h('ul', {}, (analysis.quality || []).map(q => h('li', {}, q.lead + ': ' + (q.usable ? 'пригодно для исследовательского детектора' : q.reasons.join('; '))
+      + (q.clippingSuspected ? '; возможное ограничение амплитуды' : '')))),
+    h('ol', {}, analysis.stages.map(s => h('li', {}, s.label + ' — ' + STAGE_STATUS[s.status] + (s.reason ? '. ' + s.reason : ''))))));
+  body.append(h('p', { class: 'small gap' }, `Выделено комплексов: ${analysis.beats.length}. Независимых кандидатов предсердной активности: ${analysis.atrialCandidates.length}; это не подтверждённые зубцы P.`));
+  const message = h('p', { role: 'status', class: 'small gap' });
+  body.append(h('div', { class: 'actions' },
+    printButton(`Подробный анализ ${fullName(patient)}`, () => detailedAnalysisReport(patient, record, analysis), 'Печать подробного анализа'),
+    btn('Сохранить расчёт JSON', () => saveFile(JSON.stringify(analysis, null, 2), `ECG-analysis2-${record.id}.json`, 'application/json'), '', 'save'),
+    btn('Зафиксировать в истории', async () => {
+      try {
+        const analysisHistory = [...(record.analysisHistory || []), { ...analysis, calculatedAt: new Date().toISOString() }];
+        await state.store.saveRecord({ ...record, analysisHistory });
+        record.analysisHistory = analysisHistory;
+        message.textContent = 'Результат сохранён в истории этой ЭКГ.';
+      } catch (err) { message.textContent = 'Не удалось сохранить: ' + err.message; }
+    })), message);
+  const annotationFile = h('input', { type: 'file', accept: '.json,application/json', 'aria-label': 'Разметка границ волн специалистом' });
+  annotationFile.addEventListener('change', async () => {
+    if (!annotationFile.files[0]) return;
+    try {
+      const fiducials = JSON.parse(new TextDecoder().decode(await readFile(annotationFile.files[0])));
+      const checked = analyzeECG({ ...record, fiducials }, patient);
+      if (checked.boundarySource !== 'reviewed-fiducials') throw Error('Разметка не прошла проверку исходника, автора, времени или границ.');
+      if (record.fiducials) record.fiducialHistory = [...(record.fiducialHistory || []), record.fiducials];
+      record.fiducials = fiducials;
+      await state.store.saveRecord(record); route();
+    } catch (err) { message.textContent = err.message; }
+  });
+  body.append(h('details', { class: 'gap' }, h('summary', {}, 'Разметка границ волн специалистом'),
+    h('p', { class: 'small' }, 'Можно прикрепить разметку JSON, привязанную к SHA-256 этой записи. Она задаёт границы, но не подтверждает масштаб или частоту хранения.'),
+    dropZone(annotationFile, { compact: true, title: ['Выбрать JSON разметки'] })));
+  details.append(body); return details;
+}
+
+function aiCard(patient, record, previous) {
   const box = card();
   box.id = 'ai';
   const msg = h('p', { role: 'alert', class: 'error' });
   const attach = async (key, entry) => {
+    if (!/^[a-f0-9]{64}$/.test(record.sha256 || '') || entry.sourceSha256 !== record.sha256)
+      throw Error('Анализ не привязан к исходному файлу этой ЭКГ: нужна совпадающая SHA-256. Старые вложения сохраняются в архиве.');
     record.ai = { ...(record.ai || {}), [key]: entry };
     await state.store.saveRecord(record);
     route();
   };
   const entries = Object.entries(record.ai || {});
-  box.append(h('h2', {}, 'Краткая сводка'), aiSummary(record, patient));
+  box.append(h('h2', {}, 'Итоговое ИИ-заключение'), aiSummary(record, patient, { previous, expanded: true }));
   // Attachment controls stay available without a second copy of the model output.
   if (entries.length) box.append(h('details', { class: 'no-print' }, h('summary', {}, 'Прикреплённые анализы'),
     entries.map(([key, entry]) => h('div', { class: 'actions' }, h('span', {}, MODEL_NAMES[key] || 'Анализ ИИ'),
@@ -685,7 +804,7 @@ function comparisonView(c, patient, { compact = false } = {}) {
           h('p', { class: 'small gap' }, 'Масштаб в мВ для файлов ECG301 приблизительный. Форма может меняться из-за положения электродов.')));
     } else out.append(h('p', { class: 'muted' }, w.reason));
 
-    out.append(h('h3', {}, 'Краткая сводка по новой ЭКГ'), aiSummary(c.newer, patient));
+    out.append(h('h3', {}, 'ИИ-заключение по новой ЭКГ'), aiSummary(c.newer, patient, { previous: c.older }));
     out.append(h('details', {}, h('summary', {}, 'Правила сравнения и источники'), h('div', { class: 'scroll' }, h('table', {}, h('tbody', {},
       RULES.measurements.map(r => h('tr', {}, h('td', {}, r.label), h('td', { class: 'muted' }, `шум <${r.noise}, умеренное ≥${r.minor}, выраженное ≥${r.major} ${r.unit}`),
         h('td', { class: 'muted' }, (r.basis === 'source' ? 'по источнику' : 'практический выбор') + (r.ref ? ': ' + r.ref : ''))))))),
